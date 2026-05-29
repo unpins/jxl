@@ -32,6 +32,16 @@
         let
           lib = scope.lib;
           host = scope.stdenv.hostPlatform;
+          # riscv64: libjpeg-turbo's `simdcoverage` helper references RVV
+          # `jsimd_can_*` entry points the RISC-V Vector port doesn't declare,
+          # so the build aborts with -Wimplicit-function-declaration. The shared
+          # overlay drops that unused dispatch-coverage target (the RVV SIMD code
+          # in libjpeg.a is untouched). Identity off riscv, so other arches keep
+          # the cache-hit libjpeg. (Same fix avif applies via find_package JPEG.)
+          p = scope.extend (final: prev:
+            lib.optionalAttrs host.isRiscV {
+              libjpeg = ulib.nativeFixes."libjpeg-turbo" prev;
+            });
           # With plugins off, gdk-pixbuf is dead weight (it only feeds the GDK
           # loader module we disabled), and the make-shell-wrapper-hook it drags
           # in splices to a shell that can't cross-compile. The shared overlay
@@ -49,13 +59,14 @@
           # native/darwin tools. All three cross fine on mingw (chafa ships them,
           # so they are cache hits).
           mingwExtra = lib.optionals host.isMinGW [
-            scope.windows.pthreads
-            scope.libpng
-            scope.libjpeg
-            scope.giflib
+            p.windows.pthreads
+            p.windows.mcfgthreads
+            p.libpng
+            p.libjpeg
+            p.giflib
           ];
         in
-        (ulib.nativeFixes.libjxl scope).overrideAttrs (old: {
+        (ulib.nativeFixes.libjxl p).overrideAttrs (old: {
           pname = "jxl-tools";
           # gdk-pixbuf rides in nativeBuildInputs AND (propagated)buildInputs;
           # filter all three (pkgsStatic auto-promotes buildInputs to
@@ -120,12 +131,17 @@
           extraLinkFlags = "-nostdlib++ ${sp.libcxx}/lib/libc++.a ${sp.libcxx}/lib/libc++abi.a";
         });
 
-      # mingw cross: -all-static folds the C++/thread runtime into the .exe so
-      # no libstdc++-6 / libgcc_s / libwinpthread DLLs ride alongside.
+      # mingw cross: -static* folds libgcc/libstdc++ into the .exe so no
+      # libstdc++-6 / libgcc_s / libwinpthread DLLs ride alongside. libstdc++
+      # here uses the `mcf` thread model, so std::thread (jxl_threads) pulls
+      # libmcfgthread — and JPEGXL_STATIC's mingw `link_libraries(… -Wl,-Bdynamic)`
+      # resets to dynamic before the driver's implicit `-lmcfgthread`, importing
+      # libmcfgthread-2.dll. Force its static archive (mcfgthreads is on the link
+      # path via mingwExtra) so the runtime stays inside the .exe.
       windowsBuild = pkgs:
         let cross = ulib.mingwStaticCross pkgs; in
         mk pkgs cross {
-          extraLinkFlags = "-static -static-libgcc -static-libstdc++";
+          extraLinkFlags = "-static -static-libgcc -static-libstdc++ -Wl,-Bstatic -lmcfgthread -Wl,-Bdynamic";
         };
     };
 }
