@@ -18,6 +18,21 @@
     let
       ulib = unpins-lib.lib;
 
+      # Curated man set: cjxl + djxl (jxlinfo ships no man page upstream).
+      # libjxl generates these with asciidoc (`a2x --format manpage`) from
+      # doc/man/*.txt; the shared overlay turns JPEGXL_ENABLE_MANPAGES off to keep
+      # asciidoc out of the heavy codec build, so we render them in this tiny
+      # sidecar instead. asciidoc is a `nativeBuildInput` → spliced to the BUILD
+      # host (x86_64 for the pkgsCross targets, native aarch64/darwin otherwise),
+      # never cross-compiled or emulated. Output is byte-identical to upstream.
+      # Reused for the native $out harvest (withMan) and the windows winManRoot.
+      jxlMan = pkgs: pkgs.runCommand "jxl-man" { nativeBuildInputs = [ pkgs.asciidoc ]; } ''
+        mkdir -p $out/share/man/man1
+        for t in cjxl djxl; do
+          a2x --format manpage -D $out/share/man/man1 ${pkgs.libjxl.src}/doc/man/$t.txt
+        done
+      '';
+
       # libjxl with tools ON, on a (static) pkgs scope. The shared nix-lib
       # overlay (`nativeFixes.libjxl`, the one chafa consumes) already does the
       # hard parts: plugins off (the gdk-pixbuf loader is a shared module that
@@ -116,6 +131,10 @@
     ulib.mkStandaloneFlake {
       inherit self;
       name = "jxl";
+      # Embed cjxl/djxl man on every platform. Native harvests $out/share/man
+      # (the build below installs it); the mingw cross has no nixpkgs `jxl` attr
+      # to graft, so winManRoot supplies the same x86_64-rendered set.
+      winManRoot = jxlMan unpins-lib.inputs.nixpkgs.legacyPackages.x86_64-linux;
       # Multicall: `jxl <applet> [args]` dispatches by argv[0]; the bare binary
       # takes the applet as its first arg. Smoke through that form.
       smoke = [ "cjxl" "--version" ];
@@ -126,9 +145,20 @@
       # unpins darwin allowlist rejects; fold libc++ in statically (same branch
       # as avif/vpx/srt/x265/chafa).
       build = pkgs:
-        let sp = pkgs.pkgsStatic; in
-        mk pkgs sp (pkgs.lib.optionalAttrs sp.stdenv.hostPlatform.isDarwin {
+        let
+          sp = pkgs.pkgsStatic;
+          # Per-platform man (asciidoc on the build host — never emulated). cp'd
+          # into $out so mkStandaloneFlake's withMan harvests it for native/darwin.
+          man = jxlMan sp;
+        in
+        (mk pkgs sp (pkgs.lib.optionalAttrs sp.stdenv.hostPlatform.isDarwin {
           extraLinkFlags = "-nostdlib++ ${sp.libcxx}/lib/libc++.a ${sp.libcxx}/lib/libc++abi.a";
+        })).overrideAttrs (old: {
+          postInstall = (old.postInstall or "") + ''
+            mkdir -p "$out/share/man/man1"
+            install -m644 ${man}/share/man/man1/cjxl.1 ${man}/share/man/man1/djxl.1 \
+              "$out/share/man/man1/"
+          '';
         });
 
       # mingw cross: -static* folds libgcc/libstdc++ into the .exe so no

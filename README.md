@@ -35,6 +35,10 @@ nix run github:unpins/jxl -- cjxl input.png output.jxl
 
 The first invocation will offer to add the [unpins.cachix.org](https://unpins.cachix.org) substituter so most pulls come pre-built.
 
+## Man pages
+
+`cjxl.1` and `djxl.1` are embedded in the binary — read with `unpin man jxl <tool>`. `jxlinfo` has no upstream man page.
+
 ## Manual download
 
 The [Releases](https://github.com/unpins/jxl/releases) page has standalone binaries for manual download.
