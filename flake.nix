@@ -19,17 +19,21 @@
       ulib = unpins-lib.lib;
 
       # Curated man set: cjxl + djxl (jxlinfo ships no man page upstream).
-      # libjxl generates these with asciidoc (`a2x --format manpage`) from
-      # doc/man/*.txt; the shared overlay turns JPEGXL_ENABLE_MANPAGES off to keep
-      # asciidoc out of the heavy codec build, so we render them in this tiny
-      # sidecar instead. asciidoc is a `nativeBuildInput` → spliced to the BUILD
-      # host (x86_64 for the pkgsCross targets, native aarch64/darwin otherwise),
-      # never cross-compiled or emulated. Output is byte-identical to upstream.
-      # Reused for the native $out harvest (withMan) and the windows winManRoot.
-      jxlMan = pkgs: pkgs.runCommand "jxl-man" { nativeBuildInputs = [ pkgs.asciidoc ]; } ''
+      # libjxl renders these from doc/man/*.txt; the shared overlay turns
+      # JPEGXL_ENABLE_MANPAGES off to keep the doc toolchain out of the heavy
+      # codec build, so we render them in this tiny sidecar instead. We use
+      # `asciidoctor` (Ruby), NOT upstream's a2x (`asciidoc`, Python): the pinned
+      # nixpkgs marks python3 broken on x86_64-darwin, so an asciidoc sidecar
+      # fails to *evaluate* on the Mac native build. asciidoctor is a
+      # `nativeBuildInput` → spliced to the BUILD host (x86_64 for the pkgsCross
+      # targets, native aarch64/darwin otherwise), never cross-compiled or
+      # emulated, and its output is reproducible (SOURCE_DATE_EPOCH pins the
+      # date), so all platforms embed byte-identical man. Reused for the native
+      # $out harvest (withMan) and the windows winManRoot.
+      jxlMan = pkgs: pkgs.runCommand "jxl-man" { nativeBuildInputs = [ pkgs.asciidoctor ]; } ''
         mkdir -p $out/share/man/man1
         for t in cjxl djxl; do
-          a2x --format manpage -D $out/share/man/man1 ${pkgs.libjxl.src}/doc/man/$t.txt
+          asciidoctor -b manpage -o $out/share/man/man1/$t.1 ${pkgs.libjxl.src}/doc/man/$t.txt
         done
       '';
 
@@ -147,7 +151,7 @@
       build = pkgs:
         let
           sp = pkgs.pkgsStatic;
-          # Per-platform man (asciidoc on the build host — never emulated). cp'd
+          # Per-platform man (asciidoctor on the build host — never emulated). cp'd
           # into $out so mkStandaloneFlake's withMan harvests it for native/darwin.
           man = jxlMan sp;
         in
