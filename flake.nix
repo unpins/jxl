@@ -151,9 +151,16 @@
       build = pkgs:
         let
           sp = pkgs.pkgsStatic;
-          # Per-platform man (asciidoctor on the build host — never emulated). cp'd
-          # into $out so mkStandaloneFlake's withMan harvests it for native/darwin.
-          man = jxlMan sp;
+          # Per-platform man, rendered by asciidoctor on the BUILD host. Pass the
+          # regular `pkgs` (NOT `sp`/pkgsStatic): asciidoctor is a nativeBuildInput,
+          # so it splices to `pkgs.buildPackages.asciidoctor` — the dynamic
+          # build-host tool (x86_64-linux for the pkgsCross targets, native
+          # otherwise), exactly what winManRoot uses. Passing `sp` instead drags
+          # in a static-musl ruby for the whole asciidoctor-pdf/prawn gem env,
+          # which fails to link on the cross/darwin targets. Output is
+          # deterministic, so $out man (withMan harvest) is byte-identical to the
+          # windows winManRoot set.
+          man = jxlMan pkgs;
         in
         (mk pkgs sp (pkgs.lib.optionalAttrs sp.stdenv.hostPlatform.isDarwin {
           extraLinkFlags = "-nostdlib++ ${sp.libcxx}/lib/libc++.a ${sp.libcxx}/lib/libc++abi.a";
