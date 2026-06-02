@@ -28,14 +28,24 @@
       # `nativeBuildInput` → spliced to the BUILD host (x86_64 for the pkgsCross
       # targets, native aarch64/darwin otherwise), never cross-compiled or
       # emulated, and its output is reproducible (SOURCE_DATE_EPOCH pins the
-      # date), so all platforms embed byte-identical man. Reused for the native
-      # $out harvest (withMan) and the windows winManRoot.
+      # date), so all platforms embed byte-identical man. Installed into
+      # $out/share/man on EVERY target (native AND windows) so each build
+      # harvests its OWN man via withMan — no graft.
       jxlMan = pkgs: pkgs.runCommand "jxl-man" { nativeBuildInputs = [ pkgs.asciidoctor ]; } ''
         mkdir -p $out/share/man/man1
         for t in cjxl djxl; do
           asciidoctor -b manpage -o $out/share/man/man1/$t.1 ${pkgs.libjxl.src}/doc/man/$t.txt
         done
       '';
+      # Install the rendered cjxl/djxl man into a built drv's $out. Shared by
+      # the native and windows builds; `jxlMan pkgs` renders on the build host.
+      withJxlMan = pkgs: drv: drv.overrideAttrs (old: {
+        postInstall = (old.postInstall or "") + ''
+          mkdir -p "$out/share/man/man1"
+          install -m644 ${jxlMan pkgs}/share/man/man1/cjxl.1 \
+            ${jxlMan pkgs}/share/man/man1/djxl.1 "$out/share/man/man1/"
+        '';
+      });
 
       # libjxl with tools ON, on a (static) pkgs scope. The shared nix-lib
       # overlay (`nativeFixes.libjxl`, the one chafa consumes) already does the
@@ -135,10 +145,9 @@
     ulib.mkStandaloneFlake {
       inherit self;
       name = "jxl";
-      # Embed cjxl/djxl man on every platform. Native harvests $out/share/man
-      # (the build below installs it); the mingw cross has no nixpkgs `jxl` attr
-      # to graft, so winManRoot supplies the same x86_64-rendered set.
-      winManRoot = jxlMan unpins-lib.inputs.nixpkgs.legacyPackages.x86_64-linux;
+      # Embed cjxl/djxl man on every platform: both the native and windows
+      # builds install the rendered pages into $out/share/man (withJxlMan), so
+      # each harvests its OWN man — no graft.
       # Multicall: `jxl <applet> [args]` dispatches by argv[0]; the bare binary
       # takes the applet as its first arg. Smoke through that form.
       smoke = [ "cjxl" "--version" ];
@@ -149,28 +158,11 @@
       # unpins darwin allowlist rejects; fold libc++ in statically (same branch
       # as avif/vpx/srt/x265/chafa).
       build = pkgs:
-        let
-          sp = pkgs.pkgsStatic;
-          # Per-platform man, rendered by asciidoctor on the BUILD host. Pass the
-          # regular `pkgs` (NOT `sp`/pkgsStatic): asciidoctor is a nativeBuildInput,
-          # so it splices to `pkgs.buildPackages.asciidoctor` — the dynamic
-          # build-host tool (x86_64-linux for the pkgsCross targets, native
-          # otherwise), exactly what winManRoot uses. Passing `sp` instead drags
-          # in a static-musl ruby for the whole asciidoctor-pdf/prawn gem env,
-          # which fails to link on the cross/darwin targets. Output is
-          # deterministic, so $out man (withMan harvest) is byte-identical to the
-          # windows winManRoot set.
-          man = jxlMan pkgs;
-        in
-        (mk pkgs sp (pkgs.lib.optionalAttrs sp.stdenv.hostPlatform.isDarwin {
-          extraLinkFlags = "-nostdlib++ ${sp.libcxx}/lib/libc++.a ${sp.libcxx}/lib/libc++abi.a";
-        })).overrideAttrs (old: {
-          postInstall = (old.postInstall or "") + ''
-            mkdir -p "$out/share/man/man1"
-            install -m644 ${man}/share/man/man1/cjxl.1 ${man}/share/man/man1/djxl.1 \
-              "$out/share/man/man1/"
-          '';
-        });
+        let sp = pkgs.pkgsStatic; in
+        withJxlMan pkgs
+          (mk pkgs sp (pkgs.lib.optionalAttrs sp.stdenv.hostPlatform.isDarwin {
+            extraLinkFlags = "-nostdlib++ ${sp.libcxx}/lib/libc++.a ${sp.libcxx}/lib/libc++abi.a";
+          }));
 
       # mingw cross: -static* folds libgcc/libstdc++ into the .exe so no
       # libstdc++-6 / libgcc_s / libwinpthread DLLs ride alongside. libstdc++
@@ -181,8 +173,8 @@
       # path via mingwExtra) so the runtime stays inside the .exe.
       windowsBuild = pkgs:
         let cross = ulib.mingwStaticCross pkgs; in
-        mk pkgs cross {
+        withJxlMan pkgs (mk pkgs cross {
           extraLinkFlags = "-static -static-libgcc -static-libstdc++ -Wl,-Bstatic -lmcfgthread -Wl,-Bdynamic";
-        };
+        });
     };
 }
