@@ -1,6 +1,6 @@
 # jxl
 
-Standalone build of the [libjxl](https://github.com/libjxl/libjxl) command-line tools — `cjxl` (encode), `djxl` (decode) and `jxlinfo` (inspect) for the [JPEG XL](https://jpegxl.info/) image format.
+Standalone build of the [libjxl](https://github.com/libjxl/libjxl) command-line programs for the [JPEG XL](https://jpegxl.info/) image format.
 
 [![CI](https://github.com/unpins/jxl/actions/workflows/jxl.yml/badge.svg)](https://github.com/unpins/jxl/actions)
 ![Linux](https://img.shields.io/badge/Linux-✓-success?logo=linux&logoColor=white)
@@ -25,6 +25,14 @@ unpin install jxl
 ```
 
 `unpin install jxl` creates the `cjxl`, `djxl`, and `jxlinfo` commands.
+
+## Programs
+
+| command | what it does |
+| --- | --- |
+| `cjxl` | encode to JPEG XL |
+| `djxl` | decode JPEG XL |
+| `jxlinfo` | inspect a JPEG XL file |
 
 ## Build locally
 
