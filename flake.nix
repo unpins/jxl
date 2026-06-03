@@ -102,8 +102,22 @@
           # propagated, so a drop from one list alone leaves the other —
           # see [[feedback_pkgsstatic_propagated_buildinputs]]).
           nativeBuildInputs = dropUnused (old.nativeBuildInputs or [ ]);
-          buildInputs = dropUnused (old.buildInputs or [ ]) ++ mingwExtra;
+          # OpenEXR 3.4 (nixpkgs 26.05) added HT (HTJ2K) compression via
+          # OpenJPH, so libOpenEXRCore.a references `ojph::…`. cjxl links
+          # OpenEXR for .exr I/O, so the static link now needs libopenjph — but
+          # OpenEXR's exported cmake/pc deps don't carry it, so cjxl fails with
+          # undefined `ojph::codestream::…`. buildInputs adds openjph's -L (it's
+          # already built as OpenEXR's own dep, no new cross build); the actual
+          # `-lopenjph` comes via NIX_LDFLAGS below. See
+          # [[feedback_openexr34_openjph_static_link]].
+          buildInputs = dropUnused (old.buildInputs or [ ]) ++ mingwExtra
+            ++ [ p.openjph ];
           propagatedBuildInputs = dropUnused (old.propagatedBuildInputs or [ ]);
+          # cc-wrapper appends NIX_LDFLAGS at the END of the link, AFTER the
+          # cmake-listed libs (incl. libOpenEXRCore.a), so `-lopenjph` here lands
+          # in the right order to resolve OpenEXR's ojph refs. Same drv re-runs
+          # the multicall fold, so it inherits this too.
+          NIX_LDFLAGS = (old.NIX_LDFLAGS or "") + " -lopenjph";
           # Drop the overlay's `-DJPEGXL_ENABLE_TOOLS=OFF`, turn it on, and pin
           # the adjacent gates off so only cjxl/djxl/jxlinfo are built (jpegli
           # would add cjpegli/djpegli + a hard libjpeg dep; devtools adds a

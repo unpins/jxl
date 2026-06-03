@@ -9,15 +9,22 @@ Standalone build of the [libjxl](https://github.com/libjxl/libjxl) command-line 
 
 Part of the [unpins](https://unpins.org) project — native single-binary builds with no third-party runtime dependencies.
 
-## Installation
+## Usage
 
-Install with [unpin](https://github.com/unpins/unpin):
+Run a program with [unpin](https://github.com/unpins/unpin):
 
 ```bash
-unpin jxl
+unpin jxl cjxl input.png output.jxl
+unpin jxl djxl output.jxl roundtrip.png
 ```
 
-This drops `cjxl`, `djxl` and `jxlinfo` on your PATH (they are argv[0] shims into one multicall binary).
+To install the programs onto your PATH:
+
+```bash
+unpin install jxl
+```
+
+`unpin install jxl` creates the `cjxl`, `djxl`, and `jxlinfo` commands.
 
 ## Build locally
 
