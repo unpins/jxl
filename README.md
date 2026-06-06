@@ -18,21 +18,11 @@ unpin jxl cjxl input.png output.jxl
 unpin jxl djxl output.jxl roundtrip.png
 ```
 
-To install the programs onto your PATH:
+`unpin install jxl` also creates the commands `cjxl` (encode), `djxl` (decode) and `jxlinfo` (inspect):
 
 ```bash
 unpin install jxl
 ```
-
-`unpin install jxl` creates the `cjxl`, `djxl`, and `jxlinfo` commands.
-
-## Programs
-
-| command | what it does |
-| --- | --- |
-| `cjxl` | encode to JPEG XL |
-| `djxl` | decode JPEG XL |
-| `jxlinfo` | inspect a JPEG XL file |
 
 ## Build locally
 
@@ -60,7 +50,7 @@ The [Releases](https://github.com/unpins/jxl/releases) page has standalone binar
 
 ## Build notes
 
-- **Multicall:** one binary at `bin/jxl` carries all three tools; `cjxl` / `djxl` / `jxlinfo` are dispatched by `argv[0]`. Invoke the bare binary as `jxl <tool> [args]` too.
+- **Multicall:** one binary at `bin/jxl` carries all three tools, dispatched by `argv[0]`; the bare binary also takes the tool as its first arg (`jxl cjxl …`).
 - **Formats:** reads/writes PNG, JPEG, GIF, PPM/PGM and PFM alongside `.jxl`; lossless JPEG transcoding via [brotli](https://github.com/google/brotli).
 - **Windows:** `mingw` cross, single `.exe`, no companion DLLs.
 - **macOS:** static `.a` core (libjxl/highway/lcms2) linked in; only system frameworks/libSystem stay dynamic.
