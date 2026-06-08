@@ -1,13 +1,13 @@
 # jxl
 
-Standalone build of the [libjxl](https://github.com/libjxl/libjxl) command-line programs for the [JPEG XL](https://jpegxl.info/) image format.
+The [libjxl](https://github.com/libjxl/libjxl) command-line programs for the [JPEG XL](https://jpegxl.info/) image format, as a single self-contained binary built natively for Linux, macOS, and Windows.
 
 [![CI](https://github.com/unpins/jxl/actions/workflows/jxl.yml/badge.svg)](https://github.com/unpins/jxl/actions)
 ![Linux](https://img.shields.io/badge/Linux-✓-success?logo=linux&logoColor=white)
 ![macOS](https://img.shields.io/badge/macOS-✓-success?logo=apple&logoColor=white)
 ![Windows](https://img.shields.io/badge/Windows-✓-success?logo=windows&logoColor=white)
 
-Part of the [unpins](https://unpins.org) project — native single-binary builds with no third-party runtime dependencies.
+Part of the [unpins](https://unpins.org) catalog; install it with [`unpin`](https://github.com/unpins/unpin): `unpin install jxl`.
 
 ## Usage
 
@@ -24,6 +24,10 @@ unpin jxl djxl output.jxl roundtrip.png
 unpin install jxl
 ```
 
+## Man pages
+
+`cjxl.1` and `djxl.1` are embedded in the binary — read with `unpin man jxl <tool>`. `jxlinfo` has no upstream man page.
+
 ## Build locally
 
 ```bash
@@ -39,10 +43,6 @@ nix run github:unpins/jxl -- cjxl input.png output.jxl
 ```
 
 The first invocation will offer to add the [unpins.cachix.org](https://unpins.cachix.org) substituter so most pulls come pre-built.
-
-## Man pages
-
-`cjxl.1` and `djxl.1` are embedded in the binary — read with `unpin man jxl <tool>`. `jxlinfo` has no upstream man page.
 
 ## Manual download
 
