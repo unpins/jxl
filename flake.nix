@@ -1,5 +1,5 @@
 {
-  description = "Standalone build of the JPEG XL image tools (cjxl / djxl / jxlinfo)";
+  description = "the JPEG XL tools (cjxl / djxl / jxlinfo) as a single self-contained binary";
 
   nixConfig = {
     extra-substituters = [ "https://unpins.cachix.org" ];
