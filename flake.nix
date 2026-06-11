@@ -164,7 +164,7 @@
       # each harvests its OWN man — no graft.
       # Multicall: `jxl <applet> [args]` dispatches by argv[0]; the bare binary
       # takes the applet as its first arg. Smoke through that form.
-      smoke = [ "cjxl" "--version" ];
+      smoke = [ "--unpin-program=cjxl" "--version" ];
       smokePattern = "cjxl";
 
       # Linux pkgsStatic links libstdc++ statically already. darwin: the C++
