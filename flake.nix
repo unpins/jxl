@@ -70,16 +70,8 @@
         let
           lib = scope.lib;
           host = scope.stdenv.hostPlatform;
-          # riscv64: libjpeg-turbo's `simdcoverage` helper references RVV
-          # `jsimd_can_*` entry points the RISC-V Vector port doesn't declare,
-          # so the build aborts with -Wimplicit-function-declaration. The shared
-          # overlay drops that unused dispatch-coverage target (the RVV SIMD code
-          # in libjpeg.a is untouched). Identity off riscv, so other arches keep
-          # the cache-hit libjpeg. (Same fix avif applies via find_package JPEG.)
           p = scope.extend (final: prev:
-            (lib.optionalAttrs host.isRiscV {
-              libjpeg = ulib.nativeFixes."libjpeg-turbo" prev;
-            }) // (lib.optionalAttrs (eng != null) {
+            lib.optionalAttrs (eng != null) {
               # Engine-rebuilt libhwy: libjxl only needs libhwy.a, but nixpkgs'
               # libhwy also builds its TEST binaries (HWY_SYSTEM_GTEST=ON), which
               # link the gcc/libstdc++ gtest against engine-libc++ libhwy → the
@@ -94,7 +86,7 @@
                 doCheck = false;
               });
               libjxl = prev.libjxl.override { stdenv = eng.lto; };
-            }));
+            });
           # With plugins off, gdk-pixbuf is dead weight (it only feeds the GDK
           # loader module we disabled), and the make-shell-wrapper-hook it drags
           # in splices to a shell that can't cross-compile. The shared overlay
