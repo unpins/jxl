@@ -61,15 +61,18 @@
       # highway (libhwy — a C++ SIMD lib built gcc/libstdc++ by default), the
       # tier-2 wall. Rebuild libhwy with the engine (→ libc++) like avif's codec
       # libs; libjxl itself gets the LTO stdenv (bitcode apps for the self-fold).
-      # The other deps (brotli/lcms2/png/jpeg/giflib) are C → stay gcc. OpenEXR
-      # (cjxl's optional .exr I/O) is a SEPARATE C++ lib (+ Imath/openjph) built
-      # gcc; rather than engine-build that whole sub-chain, drop EXR on the engine
-      # path (JPEGXL_ENABLE_OPENEXR=OFF below) — a niche HDR format. Asymmetric
-      # vs darwin/windows (which keep EXR), like aom's VMAF drop.
+      # The other deps (brotli/lcms2/png/jpeg/giflib) are C → stay gcc.
       mkJxlTools = eng: scope:
         let
           lib = scope.lib;
           host = scope.stdenv.hostPlatform;
+          # cjxl's optional .exr I/O. It builds clean under the engine — OpenEXR
+          # rides the set-wide stdenv swap, so it is libc++ like everything else
+          # (measured on x86_64-linux). darwin therefore keeps EXR when it moved
+          # onto the engine. linux keeps it OFF only because turning it back on
+          # would move five already-green targets, incl. the ppc64le/riscv64/
+          # armv7l crosses, for a niche HDR format — not worth the re-validation.
+          engNoExr = eng != null && !host.isDarwin;
           p = scope.extend (final: prev:
             lib.optionalAttrs (eng != null) {
               # Engine-rebuilt libhwy: libjxl only needs libhwy.a, but nixpkgs'
@@ -86,6 +89,19 @@
                 doCheck = false;
               });
               libjxl = prev.libjxl.override { stdenv = eng.lto; };
+            } // lib.optionalAttrs (eng != null && host.isx86_32) {
+              # libjxl links its tools PIE (CMakeLists.txt sets
+              # CMAKE_POSITION_INDEPENDENT_CODE after CheckPIESupported), and the
+              # unpin driver honours that -pie by emitting a static-PIE — where
+              # gcc's `-static -pie` collapsed back to plain static, hiding this.
+              # On i386 (only) libjpeg-turbo's NASM SIMD is absolute-addressed
+              # unless built PIC, so the PIE link fails on R_386_32. The asm has
+              # a PIC path (simd/CMakeLists.txt adds -DPIC); turn it on rather
+              # than drop either the SIMD or the PIE.
+              libjpeg = prev.libjpeg.overrideAttrs (o: {
+                cmakeFlags = (o.cmakeFlags or [ ])
+                  ++ [ "-DCMAKE_POSITION_INDEPENDENT_CODE=ON" ];
+              });
             });
           # With plugins off, gdk-pixbuf is dead weight (it only feeds the GDK
           # loader module we disabled), and the make-shell-wrapper-hook it drags
@@ -96,10 +112,9 @@
           dropUnused = lib.filter
             (x: !(builtins.elem (x.pname or x.name or "")
               ([ "gdk-pixbuf" "make-shell-wrapper-hook" ]
-                # Engine: EXR support is off (JPEGXL_ENABLE_OPENEXR=OFF), so drop
-                # the gcc/libstdc++ OpenEXR (+ its openjph helper) — keeping it
-                # would drag external libstdc++ into the libc++ self-fold.
-                ++ lib.optionals (eng != null) [ "openexr" "imath" ])));
+                # Engine on linux: EXR is off (JPEGXL_ENABLE_OPENEXR=OFF below),
+                # so drop OpenEXR + its imath helper. darwin keeps EXR.
+                ++ lib.optionals engNoExr [ "openexr" "imath" ])));
           # mingw: the shared overlay drops the format readers (png/jpeg/gif) as
           # dead weight for chafa's decode-only libjxl, and omits winpthreads.
           # The tools need them back: winpthreads resolves jxl_threads' bare
@@ -131,16 +146,16 @@
           # `-lopenjph` comes via NIX_LDFLAGS below. See
           # [[feedback_openexr34_openjph_static_link]].
           # openjph (+ -lopenjph below) only exists to satisfy OpenEXR's HTJ2K
-          # refs; on the engine path EXR is off, so neither is added.
+          # refs, so it rides along wherever EXR does.
           buildInputs = dropUnused (old.buildInputs or [ ]) ++ mingwExtra
-            ++ lib.optional (eng == null) p.openjph;
+            ++ lib.optional (!engNoExr) p.openjph;
           propagatedBuildInputs = dropUnused (old.propagatedBuildInputs or [ ]);
           # cc-wrapper appends NIX_LDFLAGS at the END of the link, AFTER the
           # cmake-listed libs (incl. libOpenEXRCore.a), so `-lopenjph` here lands
           # in the right order to resolve OpenEXR's ojph refs. Same drv re-runs
           # the multicall fold, so it inherits this too.
           NIX_LDFLAGS = (old.NIX_LDFLAGS or "")
-            + lib.optionalString (eng == null) " -lopenjph";
+            + lib.optionalString (!engNoExr) " -lopenjph";
           # Drop the overlay's `-DJPEGXL_ENABLE_TOOLS=OFF`, turn it on, and pin
           # the adjacent gates off so only cjxl/djxl/jxlinfo are built (jpegli
           # would add cjpegli/djpegli + a hard libjpeg dep; devtools adds a
@@ -168,10 +183,13 @@
               "-DJPEGXL_ENABLE_JPEGLI=OFF"
               "-DJPEGXL_ENABLE_DEVTOOLS=OFF"
             ]
-            # Engine: drop cjxl's .exr I/O — OpenEXR is an external gcc/libstdc++
-            # C++ lib (+ Imath/openjph) that can't resolve against the engine's
-            # libc++. Niche HDR format; darwin/windows keep it.
-            ++ lib.optional (eng != null) "-DJPEGXL_ENABLE_OPENEXR=OFF";
+            ++ lib.optional engNoExr "-DJPEGXL_ENABLE_OPENEXR=OFF";
+          # nixpkgs pins `CXXFLAGS = -mfp16-format=ieee` on aarch32 (gcc defaults
+          # to `none`, which hides `__fp16`). clang has no such option — it is
+          # always IEEE — and rejects it outright, so CMake's first try-compile
+          # dies. Only the engine path sees clang; gcc still needs the flag.
+          env = (old.env or { })
+            // lib.optionalAttrs (eng != null && host.isAarch32) { CXXFLAGS = ""; };
           # The library-install postInstall (pkg-config/cmake export plumbing)
           # is irrelevant — multicall.nix only consumes the build-tree objects +
           # cjxl's link.txt.
@@ -221,19 +239,17 @@
         requires.cxx = true;
       };
 
-      # Linux pkgsStatic links libstdc++ statically already. darwin: the C++
-      # core (libjxl/hwy) pulls `-lc++` → /usr/lib/libc++.1.dylib, which the
-      # unpins darwin allowlist rejects; fold libc++ in statically (same branch
-      # as avif/vpx/srt/x265/chafa).
+      # Linux and darwin both self-fold through the engine; only the mingw cross
+      # still goes through the hand-rolled multicall.nix. `engine` hands darwin
+      # an engine-swapped pkgsStatic too, so its objects are bitcode — and
+      # multicall.nix's fold is objcopy on native objects, which then rejects
+      # them ("not recognized as a valid object file"). libc++ needs no explicit
+      # fold here either: the engine carries its own and links it statically.
       build = pkgs:
-        if pkgs.stdenv.hostPlatform.isLinux
+        let host = pkgs.stdenv.hostPlatform; in
+        if host.isLinux || host.isDarwin
         then withJxlMan pkgs (mkJxlTools (engStdenvs pkgs) pkgs.pkgsStatic)  # engine → selfFold
-        else
-          let sp = pkgs.pkgsStatic; in
-          withJxlMan pkgs
-            (mk pkgs sp (pkgs.lib.optionalAttrs sp.stdenv.hostPlatform.isDarwin {
-              extraLinkFlags = "-nostdlib++ ${sp.libcxx}/lib/libc++.a ${sp.libcxx}/lib/libc++abi.a";
-            }));
+        else withJxlMan pkgs (mk pkgs pkgs.pkgsStatic { });
 
       # mingw cross: -static* folds libgcc/libstdc++ into the .exe so no
       # libstdc++-6 / libgcc_s / libwinpthread DLLs ride alongside. libstdc++
