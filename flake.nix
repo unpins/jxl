@@ -10,8 +10,8 @@
 
   # libjxl ships its CLI tools (cjxl / djxl / jxlinfo) under JPEGXL_ENABLE_TOOLS.
   # The shared nix-lib overlay used by chafa builds the library tools-off (chafa
-  # just wants libjxl.a to read JXL); here we turn the tools back on and
-  # post-link them into a single `jxl` binary (multicall.nix). The brotli /
+  # just wants libjxl.a to read JXL); here we turn the tools back on and let the
+  # engine self-fold them into a single `jxl` binary. The brotli /
   # highway / lcms2 deps + the PNG/JPEG/GIF image readers are the SAME ones
   # chafa proved across all nine targets, so they are cache hits.
   outputs = { self, unpins-lib }:
@@ -57,22 +57,31 @@
       # jpegli/devtools off so the build is exactly cjxl/djxl/jxlinfo. Without
       # the overlay the vanilla examples (encode_oneshot) fail the static
       # brotli link, and plugins would try to build a shared loader.
-      # `eng` (engine path only): { lto; elf; }. libjxl's tools link the SYSTEM
-      # highway (libhwy — a C++ SIMD lib built gcc/libstdc++ by default), the
-      # tier-2 wall. Rebuild libhwy with the engine (→ libc++) like avif's codec
-      # libs; libjxl itself gets the LTO stdenv (bitcode apps for the self-fold).
-      # The other deps (brotli/lcms2/png/jpeg/giflib) are C → stay gcc.
+      # `eng` ({ lto; elf; }) is the PER-PACKAGE stdenv swap the native path
+      # needs: its engine scope is pkgsStatic, where libjxl's tools would
+      # otherwise link the SYSTEM highway (libhwy — a C++ SIMD lib built
+      # gcc/libstdc++ by default), the tier-2 wall. Rebuild libhwy with the
+      # engine (→ libc++) like avif's codec libs; libjxl itself gets the LTO
+      # stdenv (bitcode apps for the self-fold). The other deps
+      # (brotli/lcms2/png/jpeg/giflib) are C → stay gcc.
+      #
+      # It stays null on the mingw cross, and that is NOT "no engine": there
+      # multicall.windows = true swaps the whole set onto the engine adapter, so
+      # every dep — libhwy included — is already libc++ with no per-package
+      # override to add. Nothing below may read `eng != null` as "is this the
+      # engine"; the two gates that could are keyed on the platform instead.
       mkJxlTools = eng: scope:
         let
           lib = scope.lib;
           host = scope.stdenv.hostPlatform;
           # cjxl's optional .exr I/O. It builds clean under the engine — OpenEXR
           # rides the set-wide stdenv swap, so it is libc++ like everything else
-          # (measured on x86_64-linux). darwin therefore keeps EXR when it moved
-          # onto the engine. linux keeps it OFF only because turning it back on
-          # would move five already-green targets, incl. the ppc64le/riscv64/
-          # armv7l crosses, for a niche HDR format — not worth the re-validation.
-          engNoExr = eng != null && !host.isDarwin;
+          # (measured on x86_64-linux). darwin and windows therefore keep EXR;
+          # linux has it OFF only because turning it back on would move five
+          # already-green targets, incl. the ppc64le/riscv64/armv7l crosses, for
+          # a niche HDR format — not worth the re-validation. Keyed on the host,
+          # not on `eng`, so the mingw cross (engine, `eng` null) keeps EXR.
+          noExr = host.isLinux;
           p = scope.extend (final: prev:
             lib.optionalAttrs (eng != null) {
               # Engine-rebuilt libhwy: libjxl only needs libhwy.a, but nixpkgs'
@@ -112,9 +121,9 @@
           dropUnused = lib.filter
             (x: !(builtins.elem (x.pname or x.name or "")
               ([ "gdk-pixbuf" "make-shell-wrapper-hook" ]
-                # Engine on linux: EXR is off (JPEGXL_ENABLE_OPENEXR=OFF below),
-                # so drop OpenEXR + its imath helper. darwin keeps EXR.
-                ++ lib.optionals engNoExr [ "openexr" "imath" ])));
+                # linux: EXR is off (JPEGXL_ENABLE_OPENEXR=OFF below), so drop
+                # OpenEXR + its imath helper. darwin and windows keep EXR.
+                ++ lib.optionals noExr [ "openexr" "imath" ])));
           # mingw: the shared overlay drops the format readers (png/jpeg/gif) as
           # dead weight for chafa's decode-only libjxl, and omits winpthreads.
           # The tools need them back: winpthreads resolves jxl_threads' bare
@@ -122,9 +131,14 @@
           # JPEG→JXL transcode) + GIF, and djxl PNG output — parity with the
           # native/darwin tools. All three cross fine on mingw (chafa ships them,
           # so they are cache hits).
+          #
+          # mcfgthreads used to ride along here: libstdc++'s mingw build uses the
+          # `mcf` thread model, so std::thread pulled -lmcfgthread and the fold
+          # forced its static archive to keep libmcfgthread-2.dll out. The engine
+          # links libc++ from the unpin sysroot and no libstdc++ at all, so
+          # nothing references it anymore.
           mingwExtra = lib.optionals host.isMinGW [
             p.windows.pthreads
-            p.windows.mcfgthreads
             p.libpng
             p.libjpeg
             p.giflib
@@ -148,14 +162,14 @@
           # openjph (+ -lopenjph below) only exists to satisfy OpenEXR's HTJ2K
           # refs, so it rides along wherever EXR does.
           buildInputs = dropUnused (old.buildInputs or [ ]) ++ mingwExtra
-            ++ lib.optional (!engNoExr) p.openjph;
+            ++ lib.optional (!noExr) p.openjph;
           propagatedBuildInputs = dropUnused (old.propagatedBuildInputs or [ ]);
           # cc-wrapper appends NIX_LDFLAGS at the END of the link, AFTER the
           # cmake-listed libs (incl. libOpenEXRCore.a), so `-lopenjph` here lands
           # in the right order to resolve OpenEXR's ojph refs. Same drv re-runs
           # the multicall fold, so it inherits this too.
           NIX_LDFLAGS = (old.NIX_LDFLAGS or "")
-            + lib.optionalString (!engNoExr) " -lopenjph";
+            + lib.optionalString (!noExr) " -lopenjph";
           # Drop the overlay's `-DJPEGXL_ENABLE_TOOLS=OFF`, turn it on, and pin
           # the adjacent gates off so only cjxl/djxl/jxlinfo are built (jpegli
           # would add cjpegli/djpegli + a hard libjpeg dep; devtools adds a
@@ -169,8 +183,8 @@
           # -lc++`. pkgsStatic still passes `-DBUILD_SHARED_LIBS=OFF`, so the
           # libs stay `.a`; the only things JPEGXL_STATIC adds on darwin are that
           # broken `-static` plus an `-static-libstdc++`/whole-archive pair
-          # already guarded off for APPLE. multicall.nix folds libc++ in
-          # statically for the final binary via extraLinkFlags.
+          # already guarded off for APPLE. requires.cxx folds libc++ in
+          # statically for the final binary.
           cmakeFlags =
             let
               drop = f:
@@ -183,7 +197,7 @@
               "-DJPEGXL_ENABLE_JPEGLI=OFF"
               "-DJPEGXL_ENABLE_DEVTOOLS=OFF"
             ]
-            ++ lib.optional engNoExr "-DJPEGXL_ENABLE_OPENEXR=OFF";
+            ++ lib.optional noExr "-DJPEGXL_ENABLE_OPENEXR=OFF";
           # nixpkgs pins `CXXFLAGS = -mfp16-format=ieee` on aarch32 (gcc defaults
           # to `none`, which hides `__fp16`). clang has no such option — it is
           # always IEEE — and rejects it outright, so CMake's first try-compile
@@ -191,15 +205,11 @@
           env = (old.env or { })
             // lib.optionalAttrs (eng != null && host.isAarch32) { CXXFLAGS = ""; };
           # The library-install postInstall (pkg-config/cmake export plumbing)
-          # is irrelevant — multicall.nix only consumes the build-tree objects +
-          # cjxl's link.txt.
+          # is irrelevant — the self-fold consumes the captured link sidecars and
+          # the bitcode module, not the installed library.
           postInstall = "";
           doCheck = false;
         });
-
-      mk = pkgs: scope: extra:
-        import ./multicall.nix { lib = pkgs.lib // ulib; }
-          ({ pkgs = scope; libjxlTools = mkJxlTools null scope; } // extra);
 
       # Engine path (native Linux): two unpin-llvm adapter stdenvs (lto for
       # libjxl's bitcode apps, no-lto ELF for the C++ libhwy codec).
@@ -226,11 +236,12 @@
       smoke = [ "--unpin-program=cjxl" "--version" ];
       smokePattern = "cjxl";
 
-      # Engine + bitcode self-fold (native Linux): libjxl (tools on) → bitcode,
+      # Engine + bitcode self-fold on every target: libjxl (tools on) → bitcode,
       # cjxl/djxl/jxlinfo self-fold into one `jxl`. C++ from libjxl + the SYSTEM
-      # libhwy (rebuilt with the engine → libc++); requires.cxx.
+      # libhwy (libc++ under the engine); requires.cxx.
       engine = "unpin-llvm";
       multicall = {
+        windows = true;
         programs = [
           { name = "cjxl"; }
           { name = "djxl"; }
@@ -239,29 +250,14 @@
         requires.cxx = true;
       };
 
-      # Linux and darwin both self-fold through the engine; only the mingw cross
-      # still goes through the hand-rolled multicall.nix. `engine` hands darwin
-      # an engine-swapped pkgsStatic too, so its objects are bitcode — and
-      # multicall.nix's fold is objcopy on native objects, which then rejects
-      # them ("not recognized as a valid object file"). libc++ needs no explicit
-      # fold here either: the engine carries its own and links it statically.
-      build = pkgs:
-        let host = pkgs.stdenv.hostPlatform; in
-        if host.isLinux || host.isDarwin
-        then withJxlMan pkgs (mkJxlTools (engStdenvs pkgs) pkgs.pkgsStatic)  # engine → selfFold
-        else withJxlMan pkgs (mk pkgs pkgs.pkgsStatic { });
+      # Native (pkgsStatic, Linux and darwin): libjxl's tools compile to bitcode
+      # under the per-package `eng` swap and self-fold. libc++ needs no explicit
+      # fold — the engine carries its own and links it statically.
+      build = pkgs: withJxlMan pkgs (mkJxlTools (engStdenvs pkgs) pkgs.pkgsStatic);
 
-      # mingw cross: -static* folds libgcc/libstdc++ into the .exe so no
-      # libstdc++-6 / libgcc_s / libwinpthread DLLs ride alongside. libstdc++
-      # here uses the `mcf` thread model, so std::thread (jxl_threads) pulls
-      # libmcfgthread — and JPEGXL_STATIC's mingw `link_libraries(… -Wl,-Bdynamic)`
-      # resets to dynamic before the driver's implicit `-lmcfgthread`, importing
-      # libmcfgthread-2.dll. Force its static archive (mcfgthreads is on the link
-      # path via mingwExtra) so the runtime stays inside the .exe.
+      # mingw cross: `eng` is null because multicall.windows = true has already
+      # swapped the whole set onto the engine adapter (see mkJxlTools).
       windowsBuild = pkgs:
-        let cross = ulib.mingwStaticCross pkgs; in
-        withJxlMan pkgs (mk pkgs cross {
-          extraLinkFlags = "-static -static-libgcc -static-libstdc++ -Wl,-Bstatic -lmcfgthread -Wl,-Bdynamic";
-        });
+        withJxlMan pkgs (mkJxlTools null (ulib.mingwStaticCross pkgs));
     };
 }
