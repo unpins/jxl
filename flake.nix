@@ -198,6 +198,25 @@
               "-DJPEGXL_ENABLE_DEVTOOLS=OFF"
             ]
             ++ lib.optional noExr "-DJPEGXL_ENABLE_OPENEXR=OFF";
+          # mingw: under JPEGXL_STATIC libjxl force-feeds every target
+          # `-Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic`, and the engine links
+          # libc++ — there is no libstdc++ to find ("unable to find library
+          # -lstdc++"). The block exists only to defeat a GNU coupling: mingw's
+          # libstdc++ calls pthreads itself, so a static libstdc++ paired with a
+          # dynamic pthread had to be forced apart by naming -lstdc++ ahead of
+          # -lpthread. libc++ has no such tie. Drop the -lstdc++ token and keep
+          # the rest: -lpthread still has to be named (jxl_threads asks for a
+          # bare -lpthread; winpthreads is in mingwExtra for exactly that).
+          #
+          # NOT the darwin treatment of dropping -DJPEGXL_STATIC entirely: on
+          # mingw that flag also supplies the `-static` and the
+          # CMAKE_FIND_LIBRARY_SUFFIXES=.a we want. Only this one line is wrong.
+          postPatch = (old.postPatch or "") + lib.optionalString host.isMinGW ''
+            substituteInPlace CMakeLists.txt \
+              --replace-fail \
+                'link_libraries(-Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)' \
+                'link_libraries(-Wl,-Bstatic -lpthread -Wl,-Bdynamic)'
+          '';
           # nixpkgs pins `CXXFLAGS = -mfp16-format=ieee` on aarch32 (gcc defaults
           # to `none`, which hides `__fp16`). clang has no such option — it is
           # always IEEE — and rejects it outright, so CMake's first try-compile
