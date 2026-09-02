@@ -264,7 +264,8 @@
         programs = [
           { name = "cjxl"; }
           { name = "djxl"; }
-          { name = "jxlinfo"; }
+          # libjxl installs cjxl.1/djxl.1 and no jxlinfo.1.
+          { name = "jxlinfo"; noMan = true; }
         ];
         requires.cxx = true;
       };
