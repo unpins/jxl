@@ -18,6 +18,13 @@
     let
       ulib = unpins-lib.lib;
 
+      # 8x8 RGB JPEG (quality 80), the probe the installCheck round-trips. A
+      # JPEG rather than a PNG because it is the only input that also exercises
+      # cjxl's lossless JPEG transcode, and decoding it gives the pixel
+      # reference the rest of the check needs — one constant, both paths.
+      probeJpgB64 =
+        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwB1nDFYtp0N1IlvbWDWkU2SRut4oHuXYjOSFZ17Y4HGcElFFc7darFTp1XC+rso7tJ/ajJ9TuwGX0sXDmqX0009Wf/Z";
+
       # Curated man set: cjxl + djxl (jxlinfo ships no man page upstream).
       # libjxl renders these from doc/man/*.txt; the shared overlay turns
       # JPEGXL_ENABLE_MANPAGES off to keep the doc toolchain out of the heavy
@@ -74,14 +81,10 @@
         let
           lib = scope.lib;
           host = scope.stdenv.hostPlatform;
-          # cjxl's optional .exr I/O. It builds clean under the engine — OpenEXR
-          # rides the set-wide stdenv swap, so it is libc++ like everything else
-          # (measured on x86_64-linux). darwin and windows therefore keep EXR;
-          # linux has it OFF only because turning it back on would move five
-          # already-green targets, incl. the ppc64le/riscv64/armv7l crosses, for
-          # a niche HDR format — not worth the re-validation. Keyed on the host,
-          # not on `eng`, so the mingw cross (engine, `eng` null) keeps EXR.
-          noExr = host.isLinux;
+          # The installCheck below runs the built tools, so it is only wired
+          # where the build host can execute them (native, i686-from-x86_64 and
+          # darwin; not the crosses, not mingw).
+          check = scope.stdenv.buildPlatform.canExecute host;
           p = scope.extend (final: prev:
             lib.optionalAttrs (eng != null) {
               # Engine-rebuilt libhwy: libjxl only needs libhwy.a, but nixpkgs'
@@ -120,10 +123,7 @@
           # otherwise darwin pulls gdk-pixbuf → glib-static, which fails to link.
           dropUnused = lib.filter
             (x: !(builtins.elem (x.pname or x.name or "")
-              ([ "gdk-pixbuf" "make-shell-wrapper-hook" ]
-                # linux: EXR is off (JPEGXL_ENABLE_OPENEXR=OFF below), so drop
-                # OpenEXR + its imath helper. darwin and windows keep EXR.
-                ++ lib.optionals noExr [ "openexr" "imath" ])));
+              [ "gdk-pixbuf" "make-shell-wrapper-hook" ]));
           # mingw: the shared overlay drops the format readers (png/jpeg/gif) as
           # dead weight for chafa's decode-only libjxl, and omits winpthreads.
           # The tools need them back: winpthreads resolves jxl_threads' bare
@@ -137,11 +137,15 @@
           # forced its static archive to keep libmcfgthread-2.dll out. The engine
           # links libc++ from the unpin sysroot and no libstdc++ at all, so
           # nothing references it anymore.
+          # openexr: the overlay drops it for mingw as dead weight for chafa's
+          # decode-only libjxl; the tools want it back (see the EXR note on
+          # buildInputs below).
           mingwExtra = lib.optionals host.isMinGW [
             p.windows.pthreads
             p.libpng
             p.libjpeg
             p.giflib
+            p.openexr
           ];
         in
         (ulib.nativeFixes.libjxl p).overrideAttrs (old: {
@@ -151,25 +155,33 @@
           # propagated, so a drop from one list alone leaves the other —
           # see [[feedback_pkgsstatic_propagated_buildinputs]]).
           nativeBuildInputs = dropUnused (old.nativeBuildInputs or [ ]);
-          # OpenEXR 3.4 (nixpkgs 26.05) added HT (HTJ2K) compression via
-          # OpenJPH, so libOpenEXRCore.a references `ojph::…`. cjxl links
-          # OpenEXR for .exr I/O, so the static link now needs libopenjph — but
-          # OpenEXR's exported cmake/pc deps don't carry it, so cjxl fails with
-          # undefined `ojph::codestream::…`. buildInputs adds openjph's -L (it's
-          # already built as OpenEXR's own dep, no new cross build); the actual
-          # `-lopenjph` comes via NIX_LDFLAGS below. See
+          # cjxl's .exr I/O is on for EVERY target. It used to be darwin-only in
+          # practice: linux had it switched off to avoid re-validating five
+          # green targets, and windows lost it silently — the shared overlay
+          # drops openexr for the mingw cross, so CMake found nothing and
+          # disabled the format without a word, while the build still carried
+          # the libopenjph that exists only to serve OpenEXR. One binary, two
+          # feature sets: `cjxl in.exr out.jxl` worked on a Mac and answered
+          # "Getting pixel data failed" everywhere else. EXR is real HDR I/O in
+          # both directions (measured: read, and write from a linear-float
+          # image), so the fix is parity. Costs ~1.2 MB.
+          #
+          # Two libraries have to be named by hand because OpenEXR 3.4 uses them
+          # and exports neither in its cmake/pc deps, so a static link fails at
+          # the last step:
+          #   - openjph: HT (HTJ2K) compression → undefined `ojph::codestream::…`
+          #   - libdeflate: DEFLATE scanlines → undefined `libdeflate_free_compressor`
+          # buildInputs supplies the -L (both are already OpenEXR's own deps, no
+          # new cross build); the `-l`s come via NIX_LDFLAGS below, which the
+          # cc-wrapper appends AFTER the cmake-listed libOpenEXRCore.a. Only
+          # mingw actually needed libdeflate — native musl resolved it through
+          # the propagated closure — but naming it everywhere costs nothing and
+          # the next OpenEXR bump will not care which target noticed first. See
           # [[feedback_openexr34_openjph_static_link]].
-          # openjph (+ -lopenjph below) only exists to satisfy OpenEXR's HTJ2K
-          # refs, so it rides along wherever EXR does.
           buildInputs = dropUnused (old.buildInputs or [ ]) ++ mingwExtra
-            ++ lib.optional (!noExr) p.openjph;
+            ++ [ p.openjph p.libdeflate ];
           propagatedBuildInputs = dropUnused (old.propagatedBuildInputs or [ ]);
-          # cc-wrapper appends NIX_LDFLAGS at the END of the link, AFTER the
-          # cmake-listed libs (incl. libOpenEXRCore.a), so `-lopenjph` here lands
-          # in the right order to resolve OpenEXR's ojph refs. Same drv re-runs
-          # the multicall fold, so it inherits this too.
-          NIX_LDFLAGS = (old.NIX_LDFLAGS or "")
-            + lib.optionalString (!noExr) " -lopenjph";
+          NIX_LDFLAGS = (old.NIX_LDFLAGS or "") + " -lopenjph -ldeflate";
           # Drop the overlay's `-DJPEGXL_ENABLE_TOOLS=OFF`, turn it on, and pin
           # the adjacent gates off so only cjxl/djxl/jxlinfo are built (jpegli
           # would add cjpegli/djpegli + a hard libjpeg dep; devtools adds a
@@ -196,8 +208,7 @@
               "-DJPEGXL_ENABLE_TOOLS=ON"
               "-DJPEGXL_ENABLE_JPEGLI=OFF"
               "-DJPEGXL_ENABLE_DEVTOOLS=OFF"
-            ]
-            ++ lib.optional noExr "-DJPEGXL_ENABLE_OPENEXR=OFF";
+            ];
           # mingw: under JPEGXL_STATIC libjxl force-feeds every target
           # `-Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic`, and the engine links
           # libc++ — there is no libstdc++ to find ("unable to find library
@@ -228,6 +239,52 @@
           # the bitcode module, not the installed library.
           postInstall = "";
           doCheck = false;
+          # `smoke` runs cjxl --version and nothing else: an encoder that lost
+          # its JPEG reconstruction path, a decoder that folded onto the wrong
+          # entry, or a stdio left in text mode all print that same line. Run
+          # all three tools for real wherever the build host can execute them.
+          #
+          # One probe drives two round trips that are different code paths:
+          #   - JPEG -> JXL -> JPEG must come back BIT-FOR-BIT. That is the
+          #     brotli-backed reconstruction data, the one thing here a
+          #     pixel comparison cannot see.
+          #   - pixels -> JXL (-d 0) -> pixels must come back byte-identical.
+          # Both are then repeated through stdout/stdin ('-'), the path a
+          # Windows CRT left in text mode corrupts and no file argument covers,
+          # and the probe finally goes out to .exr and back so a target that
+          # loses OpenEXR fails the build instead of shipping a smaller feature
+          # set than its siblings.
+          doInstallCheck = check;
+          installCheckPhase = ''
+            runHook preInstallCheck
+            _b="''${bin:-$out}/bin"
+            echo '${probeJpgB64}' | base64 -d > p.jpg
+            "$_b/cjxl" p.jpg t.jxl
+            "$_b/djxl" t.jxl back.jpg
+            cmp back.jpg p.jpg || {
+              echo "djxl did not reconstruct the original JPEG bit-for-bit"; exit 1; }
+            "$_b/djxl" t.jxl ref.ppm
+            "$_b/cjxl" -d 0 ref.ppm l.jxl
+            "$_b/djxl" l.jxl out.ppm
+            cmp out.ppm ref.ppm || { echo "-d 0 is not lossless"; exit 1; }
+            "$_b/cjxl" -d 0 ref.ppm - > s.jxl
+            cmp s.jxl l.jxl || { echo "cjxl writes a different file to stdout"; exit 1; }
+            "$_b/djxl" - so.ppm < l.jxl
+            cmp so.ppm ref.ppm || { echo "djxl reads stdin differently"; exit 1; }
+            "$_b/jxlinfo" l.jxl | grep -q '8x8' || {
+              echo "jxlinfo did not report the image size"; exit 1; }
+            # OpenEXR, both directions. EXR takes linear light, so the probe is
+            # re-encoded with a linear transfer first; djxl then has to write a
+            # real .exr and cjxl has to read it back. Without OpenEXR compiled
+            # in, djxl answers "can't decode to the file extension '.exr'" and
+            # cjxl "Getting pixel data failed" — which is exactly what the linux
+            # and windows binaries used to do while the mac one worked.
+            "$_b/cjxl" -d 0 -x color_space=RGB_D65_SRG_Rel_Lin ref.ppm lin.jxl
+            "$_b/djxl" lin.jxl e.exr
+            "$_b/cjxl" -d 0 e.exr rt.jxl
+            echo "installCheck: cjxl/djxl/jxlinfo round-trip, JPEG reconstruction bit-exact, EXR both ways"
+            runHook postInstallCheck
+          '';
         });
 
       # Engine path (native Linux): two unpin-llvm adapter stdenvs (lto for
@@ -250,10 +307,14 @@
       # Embed cjxl/djxl man on every platform: both the native and windows
       # builds install the rendered pages into $out/share/man (withJxlMan), so
       # each harvests its OWN man — no graft.
-      # Multicall: `jxl <applet> [args]` dispatches by argv[0]; the bare binary
-      # takes the applet as its first arg. Smoke through that form.
+      # Multicall: the program is chosen by argv[0] (the names `unpin install`
+      # puts on PATH) or by `--unpin-program=`; the bare binary lists them. It
+      # does NOT take the program as a positional argument.
+      #
+      # The smoke is one command matched by one grep line, so it can only prove
+      # that one program starts. The installCheck above is what runs all three.
       smoke = [ "--unpin-program=cjxl" "--version" ];
-      smokePattern = "cjxl";
+      smokePattern = "^cjxl v";
 
       # Engine + bitcode self-fold on every target: libjxl (tools on) → bitcode,
       # cjxl/djxl/jxlinfo self-fold into one `jxl`. C++ from libjxl + the SYSTEM
