@@ -72,5 +72,3 @@ The [Releases](https://github.com/unpins/jxl/releases) page has standalone binar
   lossless on the pixels.
 - **Windows:** `mingw` cross, single `.exe`, no companion DLLs.
 - **macOS:** static `.a` core (libjxl/highway/lcms2) linked in; only system frameworks/libSystem stay dynamic.
-
-The library chain (`libjxl`, `highway`, `brotli`, `lcms2`, …) is the same one wired up for [chafa](https://github.com/unpins/chafa) in [`nix-lib/native-overlay`](https://github.com/unpins/nix-lib/tree/main/native-overlay); here the tools are turned back on and post-linked into the multicall binary.
