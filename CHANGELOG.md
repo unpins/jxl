@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.11.2-2] - 2026-09-26
+
 ### Fixed
 
 - **Linux and Windows now read and write OpenEXR, which only macOS could.** The
