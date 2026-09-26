@@ -23,7 +23,7 @@
   round trips are repeated through stdin/stdout. Until now the build only
   checked that `cjxl --version` printed something.
 
-## [v0.11.2-1] — 2026-06-06
+## [0.11.2-1] - 2026-06-06
 
 Initial release: libjxl 0.11.2's `cjxl`, `djxl` and `jxlinfo` in a single
 self-contained binary, with `cjxl.1` and `djxl.1` embedded.
