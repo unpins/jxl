@@ -61,7 +61,7 @@ The [Releases](https://github.com/unpins/jxl/releases) page has standalone binar
 
 ## Build notes
 
-- One binary at `bin/jxl` carries all three tools. `unpin install jxl` puts
+- One binary at `bin/jxl` carries all three programs. `unpin install jxl` puts
   `cjxl`, `djxl` and `jxlinfo` on your PATH; from the bare binary, pick one with
   `--unpin-program=<tool>`. It is not a positional argument.
 - **Formats:** PNG/APNG, JPEG, GIF, PPM/PNM/PGX/PAM, PFM and OpenEXR alongside
@@ -70,5 +70,5 @@ The [Releases](https://github.com/unpins/jxl/releases) page has standalone binar
 - Every build encodes, decodes and inspects a real image before it is accepted:
   a JPEG has to survive the round trip byte-for-byte, and `-d 0` has to be
   lossless on the pixels.
-- **Windows:** `mingw` cross, single `.exe`, no companion DLLs.
+- **Windows:** built with mingw-w64.
 - **macOS:** static `.a` core (libjxl/highway/lcms2) linked in; only system frameworks/libSystem stay dynamic.
