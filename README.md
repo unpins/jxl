@@ -25,7 +25,7 @@ unpin install jxl
 cjxl input.png output.jxl
 ```
 
-`unpin install jxl` creates the `cjxl`, `djxl` and `jxlinfo` commands.
+`unpin install jxl` creates the `cjxl`, `djxl`, `jxlinfo` and `benchmark_xl` commands.
 
 ## Programs
 
@@ -34,10 +34,11 @@ cjxl input.png output.jxl
 | `cjxl` | encode PNG/JPEG/GIF/PPM/PFM/EXR/… → JPEG XL |
 | `djxl` | decode JPEG XL → PNG/JPEG/PPM/PFM/EXR/… |
 | `jxlinfo` | print a `.jxl` file's size, bit depth and colour space |
+| `benchmark_xl` | measure encode/decode speed and quality on a set of images |
 
 ## Man pages
 
-`cjxl.1` and `djxl.1` are embedded in the binary — read with `unpin man jxl <tool>`. `jxlinfo` has no upstream man page.
+`cjxl.1` and `djxl.1` are embedded in the binary — read with `unpin man jxl <tool>`. `jxlinfo` and `benchmark_xl` have no upstream man page.
 
 ## Build locally
 
@@ -61,14 +62,16 @@ The [Releases](https://github.com/unpins/jxl/releases) page has standalone binar
 
 ## Build notes
 
-- One binary at `bin/jxl` carries all three programs. `unpin install jxl` puts
-  `cjxl`, `djxl` and `jxlinfo` on your PATH; from the bare binary, pick one with
+- One binary at `bin/jxl` carries all four programs. `unpin install jxl` puts
+  them on your PATH; from the bare binary, pick one with
   `--unpin-program=<tool>`. It is not a positional argument.
 - **Formats:** PNG/APNG, JPEG, GIF, PPM/PNM/PGX/PAM, PFM and OpenEXR alongside
   `.jxl` — the same set on every platform. A JPEG can be transcoded to `.jxl`
   and back bit-for-bit, via [brotli](https://github.com/google/brotli).
-- Every build encodes, decodes and inspects a real image before it is accepted:
-  a JPEG has to survive the round trip byte-for-byte, and `-d 0` has to be
-  lossless on the pixels.
+- Where the build can run the result, it encodes, decodes and inspects a real
+  image before it is accepted: a JPEG has to survive the round trip
+  byte-for-byte, and `-d 0` has to be lossless on the pixels.
+- **Tests:** libjxl's own test suite runs on the native Linux builds (except
+  i686) and on Apple Silicon, as in nixpkgs, which leaves it off for i686 and
+  Intel macOS. The cross targets and Windows only build.
 - **Windows:** built with mingw-w64.
-- **macOS:** static `.a` core (libjxl/highway/lcms2) linked in; only system frameworks/libSystem stay dynamic.

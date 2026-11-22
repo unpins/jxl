@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `benchmark_xl`, libjxl's program for measuring encode/decode speed and
+  quality on a set of images (`jxl --unpin-program=benchmark_xl`).
+
 ## [0.11.2-2] - 2026-09-26
 
 ### Fixed

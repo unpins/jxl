@@ -1,0 +1,19 @@
+mingw: do not force -lstdc++ in a static build.
+
+Under JPEGXL_STATIC libjxl feeds every target
+`-Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic`. The block keeps a static
+libstdc++ apart from a dynamic pthread; the engine links libc++, which has
+no libstdc++ to find ("unable to find library -lstdc++") and no such tie.
+-lpthread stays: jxl_threads asks for a bare -lpthread.
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -280,7 +280,7 @@
+     # object files and therefore discarded. This should be set in the
+     # INTERFACE_LINK_LIBRARIES of Threads::Threads but some third_part targets
+     # don't depend on it.
+-    link_libraries(-Wl,-Bstatic -lstdc++ -lpthread -Wl,-Bdynamic)
++    link_libraries(-Wl,-Bstatic -lpthread -Wl,-Bdynamic)
+   elseif(CMAKE_USE_PTHREADS_INIT)
+     # "whole-archive" is not supported on OSX.
+     if (NOT APPLE)
